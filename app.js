@@ -35,7 +35,10 @@ const streakNow = () => (state.lastDay === dstr(0) || state.lastDay === dstr(-1)
 const dayXp = () => state.dayDate === dstr(0) ? state.dayXp : 0;
 const doneParts = id => (state.lessons[id] || {}).done || 0;
 const isDone = id => doneParts(id) >= LESSONS[id].parts;
-const unlocked = id => { const i = ORDER.indexOf(id); return i === 0 || state.unlock || isDone(ORDER[i - 1]) || doneParts(id) > 0; };
+// Die erste Lektion jedes Niveaus (A1, A2, B2) ist immer offen – so kann man auch quer einsteigen.
+const ENTRY = new Set(UNITS.filter((u, i) => i === 0 || u.lvl !== UNITS[i - 1].lvl).map(u => u.lessons[0]));
+const LVL_NAME = { A1: 'Einsteiger – ganz ohne Vorwissen', A2: 'Grundlagen – der Alltag sitzt', B2: 'Fortgeschritten – mitreden bei allem' };
+const unlocked = id => { const i = ORDER.indexOf(id); return ENTRY.has(id) || state.unlock || isDone(ORDER[i - 1]) || doneParts(id) > 0; };
 const LEVELS = ['Ternerito', 'Torito curioso', 'Torito valiente', 'Toro viajero', 'Toro charlatán', 'Toro sabio', 'Toro bravo', 'Gran Toro', 'Toro leyenda'];
 const level = () => Math.floor(state.xp / 250) + 1;
 const levelName = () => LEVELS[Math.min(level() - 1, LEVELS.length - 1)];
@@ -165,7 +168,7 @@ const topbar = () => `<header class="top"><div class="chip" title="Tage-Serie">�
 function greeting() {
   const h = new Date().getHours(), hi = h < 12 ? '¡Buenos días!' : h < 20 ? '¡Buenas tardes!' : '¡Buenas noches!';
   const due = dueWords().length;
-  if (!state.sessions) return `<b>¡Hola! Soy Paco.</b> Ich begleite dich bis zum B2. Tippe auf die erste Lektion – ¡vamos!`;
+  if (!state.sessions) return `<b>¡Hola! Soy Paco.</b> Ich begleite dich von null bis zum B2. Tippe auf die erste Lektion – ¡vamos!`;
   if (dayXp() >= state.goal) return `<b>${hi}</b> Tagesziel geschafft – ¡olé! Alles ab jetzt ist Bonus.`;
   if (state.lastDay === dstr(-1)) return `<b>${hi}</b> Deine Serie steht bei ${state.streak} ${state.streak === 1 ? 'Tag' : 'Tagen'}. Eine Runde heute und sie wächst!`;
   if (due >= 8) return `<b>${hi}</b> ${due} Wörter möchten wiederholt werden. Schau mal bei „Üben" vorbei.`;
@@ -174,7 +177,9 @@ function greeting() {
 
 /* ---------- Start: Lernpfad ---------- */
 function vHome() {
-  const cur = ORDER.find(id => !isDone(id));
+  // „Start" steht bei der nächsten offenen Lektion nach der zuletzt gespielten
+  const from = Math.max(0, ORDER.indexOf(state.last));
+  const cur = ORDER.slice(from).find(id => !isDone(id)) || ORDER.find(id => !isDone(id));
   const pct = Math.min(100, Math.round(dayXp() / state.goal * 100));
   const total = ORDER.filter(isDone).length;
   let h = topbar() + `<section class="hero">${paco()}<div class="bubble">${greeting()}</div></section>
@@ -184,7 +189,8 @@ function vHome() {
   let n = 0;
   UNITS.forEach((u, ui) => {
     const d = u.lessons.filter(isDone).length;
-    h += `<section class="unit c${ui % 5}"><div class="unit-head"><small>Etappe ${ui + 1} · ${d}/${u.lessons.length}</small><h2>${u.title}</h2><p>${u.sub}</p></div><div class="path">`;
+    if (ui === 0 || u.lvl !== UNITS[ui - 1].lvl) h += `<div class="lvl-head"><b>${u.lvl}</b><span>${LVL_NAME[u.lvl] || ''}</span></div>`;
+    h += `<section class="unit c${ui % 5}"><div class="unit-head"><small>${u.lvl} · Etappe ${ui + 1} · ${d}/${u.lessons.length}</small><h2>${u.title}</h2><p>${u.sub}</p></div><div class="path">`;
     u.lessons.forEach(id => {
       const L = LESSONS[id], done = isDone(id), open = unlocked(id), r = state.lessons[id] || {};
       const cls = [L.type === 'g' ? 'gram' : '', done ? 'done' : '', !open ? 'locked' : '', id === cur ? 'cur' : ''].join(' ');
@@ -306,7 +312,7 @@ const STEP = {
       const ok = b.textContent === st.a;
       $$('.opt', sb).forEach(x => { x.disabled = true; if (x.textContent === st.a) x.classList.add('right'); });
       if (!ok) b.classList.add('wrong');
-      if (st.cloze) { $('.blank', sb).textContent = st.a; $('.blank', sb).classList.add('filled'); if (state.sound) speak(st.prompt.replace('___', st.a)); }
+      if (st.cloze) { $('.blank', sb).textContent = st.a; $('.blank', sb).classList.add('filled'); if (state.sound && !st.prompt.includes('„')) speak(st.prompt.replace('___', st.a).replace(/\s*\([^)]*\)/g, '')); }
       else if (st.sayA && state.sound) speak(st.a);
       judge(st, ok, { answer: st.cloze ? null : st.a, why: st.why });
     });
@@ -377,6 +383,7 @@ function finish() {
   const xp = 10 + S.ok + (S.bad === 0 ? 5 : 0);
   const t = dstr(0);
   if (S.lessonId) {
+    state.last = S.lessonId;
     const r = state.lessons[S.lessonId] || (state.lessons[S.lessonId] = { done: 0, stars: 0 });
     if (S.part >= r.done) r.done = S.part + 1;
     r.stars = Math.max(r.stars, stars);
